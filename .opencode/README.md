@@ -89,5 +89,6 @@ to bring them back.
   the same agent without the command wrapper.
 - **An `agent:` switch does not auto-revert.** After `/grill` the session stays on `mp-grill`.
   Each primary's prompt ends by reminding you to switch back to `build`.
-- **Project-scoped by default.** The installer can also symlink the commands and agents into
-  `~/.config/opencode/` so every project gets them. See the repo README.
+- **Global or project-local.** The installer can symlink the commands and agents into
+  `~/.config/opencode/` so every project gets them, or copy them into a repo's `.opencode/`.
+  See the repo README.
