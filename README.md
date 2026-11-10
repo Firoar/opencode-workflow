@@ -66,6 +66,11 @@ per-repo state.
 `verification.md` is what makes the workflow portable: it carries the install, lint, typecheck,
 test, and "never run" commands for this repo. `/setup` detects the toolchain and proposes them.
 
+**Shell permissions.** The implementer and merger pre-allow `git` only. The commands in
+`verification.md` (`yarn`, `npx`, `pytest`, `go`, …) fall through to your global permission
+config. If that config prompts, allow them globally or add them to the agents' `shell` allow list,
+or every implementer will stop for approval.
+
 ## Profiles
 
 | Profile | Use when |
