@@ -31,6 +31,9 @@ Look at the current repo to understand its starting state. Read whatever exists;
 - `docs/adr/` and any `src/*/docs/adr/` directories
 - `docs/agents/`: does this command's prior output already exist?
 - `.scratch/`: a sign that a local-markdown issue tracker convention is already in use
+- Toolchain signals: `package.json` plus `yarn.lock` / `pnpm-lock.yaml` / `package-lock.json`,
+  `pyproject.toml`, `go.mod`, `Cargo.toml`, `Makefile`. Read the existing scripts before proposing
+  verification commands.
 - Monorepo signals: a `pnpm-workspace.yaml`, a `workspaces` field in `package.json`, or a
   populated `packages/*` with its own `src/`. These are present only in a genuinely large
   multi-package repo; their absence means single-context, which is almost every repo.
@@ -83,13 +86,31 @@ repo root). This fits almost every repo; write it without asking.
 Offer **multi-context** (a root `GLOSSARY-MAP.md` pointing to per-context `GLOSSARY.md` files)
 only when exploration found monorepo signals. Then confirm which layout they want.
 
+**Section D: Verification.** Read the toolchain signals and propose the exact commands. The
+implementer and merger run these before reporting done; they live in
+`docs/agents/verification.md`, not in the agent prompts, so the workflow stays toolchain-agnostic.
+
+Propose:
+
+- **Install** (only if dependencies are missing): e.g. `yarn install --frozen-lockfile`,
+  `pnpm install --frozen-lockfile`, `pip install -e .`, `go mod download`, or "none".
+- **Lint**: e.g. `yarn lint`, `ruff check .`, `go vet ./...`.
+- **Typecheck**: e.g. `npx tsc --noEmit`, `mypy .`, `go build ./...`.
+- **Test**: e.g. `yarn test`, `pytest`, `go test ./...`.
+- **Never run**: commands that must not run in parallel, e.g. native builds, emulators, watch
+  modes.
+
+Lead with the detected commands. If the repo has no obvious toolchain, ask for the commands rather
+than guessing. If a fresh worktree has no dependencies, say how to make them available — symlink
+`node_modules` from the main checkout for Yarn 1, or run the install command.
+
 ### 3. Confirm and edit
 
 Show the user a draft of:
 
 - The `## Agent workflow` block to add to whichever of `CLAUDE.md` / `AGENTS.md` is being edited
-- The contents of `docs/agents/issue-tracker.md`, `docs/agents/domain.md`, and
-  `docs/agents/triage-labels.md`
+- The contents of `docs/agents/issue-tracker.md`, `docs/agents/domain.md`,
+  `docs/agents/triage-labels.md`, and `docs/agents/verification.md`
 
 Let them edit before writing.
 
@@ -121,13 +142,17 @@ The block:
 ### Domain docs
 
 [one-line summary of layout: "single-context" or "multi-context"]. See `docs/agents/domain.md`.
+
+### Verification
+
+[one-line summary of the lint / typecheck / test commands]. See `docs/agents/verification.md`.
 ```
 
 On GitHub or GitLab, create each configured label the tracker lacks (`gh label create` /
 `glab label create`).
 
 Then write `docs/agents/issue-tracker.md` (from the matching template in the command that invoked
-you), `docs/agents/triage-labels.md`, and `docs/agents/domain.md`.
+you), `docs/agents/triage-labels.md`, `docs/agents/domain.md`, and `docs/agents/verification.md`.
 
 For "other" issue trackers, write `docs/agents/issue-tracker.md` from scratch using the user's
 description, keeping the same section headings as the seed templates so the other commands can
@@ -137,7 +162,8 @@ find what they need: **Conventions**, **When a command says "publish to the issu
 ### 5. Done
 
 Tell the user setup is complete and which commands now read from these files (`/to-spec`,
-`/to-tickets`, `/implement`, `/code-review`). Mention they can edit `docs/agents/*.md` directly
-later; re-running `/setup` is only necessary to switch trackers or start over.
+`/to-tickets`, `/implement`, `/code-review`, and the implementer/merger workers, which read
+`docs/agents/verification.md`). Mention they can edit `docs/agents/*.md` directly later;
+re-running `/setup` is only necessary to switch trackers, change the toolchain, or start over.
 
 Then remind them to switch back to the `build` agent.

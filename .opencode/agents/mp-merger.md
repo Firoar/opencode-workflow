@@ -21,19 +21,15 @@ You cannot delegate. Subagent nesting is disabled.
 
 1. Check out the integration branch in the main checkout.
 2. Merge the ticket branch into it.
-3. Run `yarn lint`, `npx tsc --noEmit`, and `yarn test` on the merged result.
-4. Report: merged cleanly or not, lint/typecheck/test status, and the resulting commit.
-
-Do **not** run `expo start` or `expo run:android`; native builds are not part of this loop.
+3. Run the verification commands in `docs/agents/verification.md` on the merged result.
+4. Report: merged cleanly or not, verification status, and the resulting commit.
 
 ## Rules
 
-- **You do not implement features.** If the merge conflicts in a way that needs real judgement
-  about the feature, stop and report the conflicting files and hunks. The orchestrator will send
-  a fresh implementer. Do not guess at the intended behaviour.
-- **Trivial conflicts you may resolve**: lockfiles, import ordering, changelog or barrel-file
-  append points, and other places where both sides are additive and the union is obviously
-  correct. Say in your report exactly what you resolved and how.
+- **You do not implement features.** If the merge conflicts at all, run `git merge --abort`, then
+  report the conflicting files and hunks. The orchestrator will send a fresh implementer. Do not
+  resolve anything yourself, not even a lockfile or an import-ordering conflict: `deny edit *` is
+  deliberate, and a resolution the tools cannot write is worse than an honest abort.
 - **If the tests fail after a clean merge**, that is a real finding — two tickets that each passed
   alone have interacted. Report it with the failing test output. Do not fix it yourself.
 - Never `git push`.

@@ -211,3 +211,29 @@ If your output contradicts an existing ADR, surface it explicitly rather than si
 
 > _Contradicts ADR-0007 (event-sourced orders), but worth reopening because…_
 ```
+
+---
+
+# Seed template: `docs/agents/verification.md`
+
+```markdown
+# Verification
+
+Commands every implementer and merger must run before reporting done. Replace the placeholders
+with this repo's actual commands. Use inline code, not fenced blocks, so the template stays easy
+to read.
+
+## Install (only if dependencies are missing)
+
+Run: `<install command>`. If no install step is needed, write "none".
+
+## Before you finish
+
+1. Lint: `<lint command>`
+2. Typecheck: `<typecheck command>`
+3. Test: `<test command>`
+
+## Never run
+
+- `<command>` — `<why this command is excluded, e.g. a native build that fights over a lock>`
+```

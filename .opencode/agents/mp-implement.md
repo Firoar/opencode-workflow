@@ -82,7 +82,6 @@ before its worktree exists):
 
 ```
 git worktree add ~/.opencode-work/<repo>/<slug>/wt/<NN> -b <slug>/<NN> <slug>/integration
-ln -s "$(git rev-parse --show-toplevel)/node_modules" ~/.opencode-work/<repo>/<slug>/wt/<NN>/node_modules
 ```
 
 Then, in the **next message**, launch one `subagent` per ticket with `agent: "mp-implementer"`,
@@ -90,7 +89,9 @@ Then, in the **next message**, launch one `subagent` per ticket with `agent: "mp
 starts with fresh context and has no access to this conversation, so the prompt must carry:
 
 - the absolute worktree path — tell it to use this as `workdir` for every command
-- the main checkout's absolute path, so it can read `AGENTS.md` and symlink dependencies if needed
+- the main checkout's absolute path, so it can read `AGENTS.md` and `docs/agents/verification.md`
+- the path to `docs/agents/verification.md`, which carries the install/lint/typecheck/test
+  commands and the "never run" list
 - its branch name (`<slug>/<NN>`) and the integration branch name (`<slug>/integration`)
 - the ticket reference (issue number or file path) — not the ticket body; it can read it
 - the spec reference
@@ -118,8 +119,8 @@ fresh `mp-implementer` in that ticket's worktree to fix it, and merge again.
 ### 7. Recompute and relaunch
 
 After each successful merge, recompute the frontier. Any ticket whose last blocker just landed is
-now startable: create its worktree, symlink `node_modules`, and launch it in the background
-immediately. Update the `todowrite` list.
+now startable: create its worktree and launch it in the background immediately. Update the
+`todowrite` list.
 
 Repeat steps 6 and 7 until every ticket is merged. This is the whole engine of the thing — tickets
 flow onto the frontier as their blockers land, and the frontier is always saturated.
@@ -139,8 +140,8 @@ them.
 
 ### 9. Fix the findings
 
-Create a new worktree off the integration branch, symlink `node_modules`, then launch a single
-fresh `mp-implementer` to fix everything both reviews raised, then merge it.
+Create a new worktree off the integration branch, then launch a single fresh `mp-implementer` to
+fix everything both reviews raised, then merge it.
 
 ### 10. Finish
 
@@ -150,8 +151,8 @@ fresh `mp-implementer` to fix everything both reviews raised, then merge it.
   then `git worktree prune`, then delete the merged ticket branches.
 - Report the integration branch and a one-line summary per ticket.
 
-Verification in every worktree is `yarn lint`, `npx tsc --noEmit`, and `yarn test`. Never run
-`expo start` or `expo run:android` in parallel — native builds fight over Gradle/Metro.
+Verification comes from `docs/agents/verification.md`. Point every implementer and the merger at
+it; do not hardcode a toolchain here. Never run two implementers in the same checkout at once.
 
 Never `git push` — that is the user's call.
 

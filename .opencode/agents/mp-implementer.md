@@ -33,24 +33,22 @@ Before you write a single line:
 2. Read the ticket. State its title and acceptance criteria back in your first message.
 3. Read `AGENTS.md` at the main checkout root for this repo's commands and conventions.
 4. Read any research notes you were pointed at, rather than re-exploring the codebase yourself.
-5. Make sure dependencies are available. If the worktree has no `node_modules`, symlink the main
-   checkout's copy (Yarn 1): `ln -s <main-checkout>/node_modules ./node_modules`. Do not run
-   `yarn install` unless the symlink fails.
+5. Make dependencies available by following the install step in
+   `docs/agents/verification.md`. A fresh worktree usually has no dependencies; do exactly what
+   that file says (for a Yarn 1 repo it may be a symlink to the main checkout's `node_modules`).
 
 ## Before you finish
 
-1. Run `yarn lint`.
-2. Run `npx tsc --noEmit`.
-3. Run `yarn test` once.
-4. Commit your work to your own branch.
-5. Merge the integration branch tip into your branch, so the merger's job is trivial:
+1. Run every command in `docs/agents/verification.md` under "Before you finish": lint, typecheck,
+   and test. If the file is missing, stop and report that instead of guessing the toolchain.
+2. Commit your work to your own branch.
+3. Merge the integration branch tip into your branch, so the merger's job is trivial:
    `git merge <integration-branch>`. Resolve any conflicts here, in your worktree — you have the
    context to do it, and the merger does not.
-6. Report back: the ticket, your branch name, the commit SHA, what you built, lint/typecheck/test
-   status, and any conflict you resolved. Keep it short. Your caller is orchestrating many of these.
+4. Report back: the ticket, your branch name, the commit SHA, what you built, verification status,
+   and any conflict you resolved. Keep it short. Your caller is orchestrating many of these.
 
-Do **not** run `expo start` or `expo run:android`; native builds are not part of this loop and
-will fight over Gradle/Metro.
+Do **not** run any command listed under "Never run" in `docs/agents/verification.md`.
 
 Never `git push`. Your work reaches the outside world through the merger, not through you.
 
