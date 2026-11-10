@@ -5,7 +5,6 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SOURCE="$REPO_ROOT/.opencode"
 PROFILE_NAME="four-model"
 DRY_RUN=0
-FORCE=0
 
 usage() {
   cat <<'EOF'
@@ -18,13 +17,12 @@ Usage:
 Commands:
   global              Render commands + agents and symlink them into ~/.config/opencode
   project <directory> Render commands + agents and copy them into <directory>/.opencode
-  doctor              Verify the symlinks, the profile, and the model IDs
+  doctor              Verify the symlinks, the profile, the model IDs, and the tracker CLI
   uninstall           Remove the global symlinks created by this script
 
 Options:
   --profile NAME      Profile under profiles/ without .env (default: four-model)
   --dry-run           Print what would happen without changing anything
-  --force             Accepted for compatibility; existing paths are always backed up
 EOF
 }
 
@@ -44,7 +42,6 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --profile) PROFILE_NAME="${2:?--profile needs a value}"; shift 2 ;;
     --dry-run) DRY_RUN=1; shift ;;
-    --force) FORCE=1; shift ;;
     global|doctor|uninstall) COMMAND="$1"; shift ;;
     project) COMMAND="project"; shift; PROJECT_DIR="${1:?project needs a directory}"; shift ;;
     -h|--help) usage; exit 0 ;;
@@ -52,6 +49,9 @@ while [ $# -gt 0 ]; do
   esac
 done
 [ -n "$COMMAND" ] || { usage; exit 1; }
+
+# A profile name reaches a path that is rm -rf'd. Keep it boring.
+[[ "$PROFILE_NAME" =~ ^[A-Za-z0-9._-]+$ ]] || die "invalid profile name: $PROFILE_NAME"
 
 PROFILE_FILE="$REPO_ROOT/profiles/$PROFILE_NAME.env"
 [ -f "$PROFILE_FILE" ] || die "profile not found: $PROFILE_FILE"
@@ -61,11 +61,16 @@ set -a
 . "$PROFILE_FILE"
 set +a
 
-MODEL_VARS=(
-  MODEL_GRILL MODEL_SPEC MODEL_TICKETS MODEL_IMPLEMENT MODEL_IMPLEMENTER
-  MODEL_REVIEW MODEL_REVIEW_STANDARDS MODEL_REVIEW_SPEC MODEL_EXPLORER
-  MODEL_MERGER MODEL_SETUP MODEL_HANDOFF
+# Derive the placeholder list from the sources so it cannot drift from the profile.
+MODEL_VARS=()
+while IFS= read -r v; do
+  MODEL_VARS+=("$v")
+done < <(
+  grep -rhoE '__MODEL_[A-Z_]+__' "$SOURCE/agents" "$SOURCE/commands" |
+    sort -u |
+    sed 's/^__//; s/__$//'
 )
+[ "${#MODEL_VARS[@]}" -gt 0 ] || die "no __MODEL_*__ placeholders found in $SOURCE"
 for v in "${MODEL_VARS[@]}"; do
   [ -n "${!v:-}" ] || die "profile $PROFILE_NAME is missing $v"
 done
@@ -73,6 +78,7 @@ done
 CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/opencode"
 DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/opencode-workflow/$PROFILE_NAME"
 WORK_DIR="$HOME/.opencode-work"
+SKILL_RULE='{ "action": "skill", "resource": "*", "effect": "deny" }'
 
 if sed --version >/dev/null 2>&1; then
   SED_INPLACE=(sed -i)
@@ -117,6 +123,62 @@ render() {
   fi
 }
 
+copy_tree_files() {
+  local src="$1" dest="$2" f name
+  mkdir -p "$dest"
+  for f in "$src"/*.md; do
+    [ -e "$f" ] || continue
+    name="$(basename "$f")"
+    if [ -e "$dest/$name" ]; then
+      backup_path "$dest/$name"
+    fi
+    cp "$f" "$dest/$name"
+  done
+}
+
+merge_project_config() {
+  local dest="$1"
+  if [ ! -e "$dest" ]; then
+    cp "$SOURCE/opencode.json" "$dest"
+    log "wrote $dest"
+    return
+  fi
+  if [ "$DRY_RUN" -eq 1 ]; then
+    log "[dry-run] would merge the skill-suppression rule into $dest"
+    return
+  fi
+  cp "$dest" "${dest}.bak-$(date +%Y%m%d-%H%M%S)"
+  if python3 - "$dest" <<'PY'
+import json
+import sys
+
+path = sys.argv[1]
+with open(path) as f:
+    data = json.load(f)
+if not isinstance(data, dict):
+    raise SystemExit(2)
+
+rule = {"action": "skill", "resource": "*", "effect": "deny"}
+permissions = data.get("permissions")
+if not isinstance(permissions, list):
+    permissions = []
+if rule not in permissions:
+    permissions.append(rule)
+data["permissions"] = permissions
+
+with open(path, "w") as f:
+    json.dump(data, f, indent=2)
+    f.write("\n")
+PY
+  then
+    log "merged the skill-suppression rule into $dest"
+  else
+    log "warn: could not parse $dest as JSON; left it untouched."
+    log "      Add this to its permissions array manually:"
+    log "      $SKILL_RULE"
+  fi
+}
+
 install_global() {
   render "$DATA_DIR"
   if [ "$DRY_RUN" -eq 1 ]; then
@@ -127,13 +189,38 @@ install_global() {
   fi
   mkdir -p "$CONFIG_DIR"
   for item in commands agents; do
-    if [ -e "$CONFIG_DIR/$item" ] || [ -L "$CONFIG_DIR/$item" ]; then
+    if [ -L "$CONFIG_DIR/$item" ]; then
+      local current
+      current="$(readlink -f "$CONFIG_DIR/$item" 2>/dev/null || true)"
+      if [ "$current" = "$(readlink -f "$DATA_DIR/$item" 2>/dev/null || true)" ]; then
+        rm "$CONFIG_DIR/$item"
+      else
+        backup_path "$CONFIG_DIR/$item"
+      fi
+    elif [ -e "$CONFIG_DIR/$item" ]; then
       backup_path "$CONFIG_DIR/$item"
     fi
     ln -s "$DATA_DIR/$item" "$CONFIG_DIR/$item"
     log "linked $CONFIG_DIR/$item -> $DATA_DIR/$item"
   done
   mkdir -p "$WORK_DIR"
+
+  if [ ! -e "$CONFIG_DIR/opencode.json" ] && [ ! -e "$CONFIG_DIR/opencode.jsonc" ]; then
+    cat > "$CONFIG_DIR/opencode.json" <<EOF
+{
+  "\$schema": "https://opencode.ai/config.json",
+  "permissions": [
+    $SKILL_RULE
+  ]
+}
+EOF
+    log "wrote $CONFIG_DIR/opencode.json with skill suppression"
+  else
+    log "note: global installs cannot safely edit your opencode config."
+    log "      To suppress auto-discovered skills, add this to its permissions array:"
+    log "      $SKILL_RULE"
+  fi
+
   log "installed profile '$PROFILE_NAME' globally"
   log "next: run /setup in each repo"
 }
@@ -144,20 +231,13 @@ install_project() {
   local dest="$dir/.opencode"
   render "$DATA_DIR"
   if [ "$DRY_RUN" -eq 1 ]; then
-    log "[dry-run] would copy commands + agents + opencode.json into $dest"
+    log "[dry-run] would copy commands + agents into $dest"
+    log "[dry-run] would merge the skill-suppression rule into $dest/opencode.json"
     return
   fi
-  mkdir -p "$dest"
-  for item in commands agents; do
-    if [ -e "$dest/$item" ]; then
-      backup_path "$dest/$item"
-    fi
-    cp -R "$DATA_DIR/$item" "$dest/$item"
-  done
-  if [ -e "$dest/opencode.json" ]; then
-    backup_path "$dest/opencode.json"
-  fi
-  cp "$DATA_DIR/opencode.json" "$dest/opencode.json"
+  copy_tree_files "$DATA_DIR/commands" "$dest/commands"
+  copy_tree_files "$DATA_DIR/agents" "$dest/agents"
+  merge_project_config "$dest/opencode.json"
   log "installed profile '$PROFILE_NAME' into $dest"
   log "next: run /setup in $dir"
 }
@@ -185,6 +265,30 @@ doctor() {
     fi
   done
 
+  if command -v git >/dev/null 2>&1; then
+    log "ok: git"
+  else
+    log "MISSING: git"
+  fi
+
+  local global_cfg found_rule=0
+  for global_cfg in "$CONFIG_DIR/opencode.json" "$CONFIG_DIR/opencode.jsonc"; do
+    [ -f "$global_cfg" ] || continue
+    if grep -Eq '"action"[[:space:]]*:[[:space:]]*"skill"|"skill"[[:space:]]*:' "$global_cfg"; then
+      log "ok: skill suppression rule found in $global_cfg"
+      found_rule=1
+    fi
+  done
+  if [ -f "$PWD/.opencode/opencode.json" ] &&
+     grep -Eq '"action"[[:space:]]*:[[:space:]]*"skill"|"skill"[[:space:]]*:' "$PWD/.opencode/opencode.json"; then
+    log "ok: skill suppression rule found in $PWD/.opencode/opencode.json"
+    found_rule=1
+  fi
+  if [ "$found_rule" -eq 0 ]; then
+    log "note: no skill suppression rule found in the global or project config; add this to a permissions array:"
+    log "      $SKILL_RULE"
+  fi
+
   local available
   available="$(opencode models 2>/dev/null || true)"
   if [ -z "$available" ]; then
@@ -210,18 +314,42 @@ doctor() {
 
   if [ -d "$PWD/docs/agents" ]; then
     log "ok: $PWD/docs/agents"
+    if [ -f "$PWD/docs/agents/verification.md" ]; then
+      log "ok: $PWD/docs/agents/verification.md"
+    else
+      log "note: no docs/agents/verification.md; re-run /setup or add it"
+    fi
+    if [ -f "$PWD/docs/agents/issue-tracker.md" ]; then
+      if grep -qi 'GitHub' "$PWD/docs/agents/issue-tracker.md"; then
+        if command -v gh >/dev/null 2>&1; then log "ok: gh"; else log "MISSING: gh (tracker says GitHub)"; fi
+      fi
+      if grep -qi 'GitLab' "$PWD/docs/agents/issue-tracker.md"; then
+        if command -v glab >/dev/null 2>&1; then log "ok: glab"; else log "MISSING: glab (tracker says GitLab)"; fi
+      fi
+    fi
   else
     log "note: run /setup in this repo"
   fi
 }
 
 uninstall() {
+  local data_resolved=""
+  data_resolved="$(readlink -f "$DATA_DIR" 2>/dev/null || true)"
+
   for item in commands agents; do
     if [ -L "$CONFIG_DIR/$item" ]; then
       local target
-      target="$(readlink -f "$CONFIG_DIR/$item")"
+      target="$(readlink -f "$CONFIG_DIR/$item" 2>/dev/null || true)"
+      if [ -z "$target" ]; then
+        log "skipped $CONFIG_DIR/$item (broken symlink)"
+        continue
+      fi
+      if [ -z "$data_resolved" ]; then
+        log "skipped $CONFIG_DIR/$item (data dir not found: $DATA_DIR)"
+        continue
+      fi
       case "$target" in
-        "$(readlink -f "$DATA_DIR")"/*)
+        "$data_resolved"/*)
           run rm "$CONFIG_DIR/$item"
           log "removed $CONFIG_DIR/$item"
           ;;
@@ -233,6 +361,8 @@ uninstall() {
       log "skipped $CONFIG_DIR/$item (not a symlink)"
     fi
   done
+
+  log "note: $DATA_DIR and $WORK_DIR are left in place; remove them manually for a clean slate."
 }
 
 case "$COMMAND" in
