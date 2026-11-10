@@ -1,0 +1,9 @@
+# OS
+.DS_Store
+
+# Installer backups
+*.bak-*
+
+# Local env overrides
+.env
+.env*.local
