@@ -6,9 +6,17 @@ Seven slash commands that turn opencode into a disciplined engineering workflow:
 Ported from [mattpocock/skills](https://github.com/mattpocock/skills) into native opencode
 commands + agents. Fully self-contained: no skill files, no runtime dependency on `.agents/skills`.
 
+> **Slash commands only expand in the TUI.** `opencode run "/grill ..."` passes the text
+> literally; the model will not expand it. Use the interactive TUI, or `--agent mp-grill` to get
+> the same agent without the command wrapper.
+
+The workflow is **toolchain-agnostic**. It does not assume Yarn, Expo, Python, or Go. Each repo
+records its install / lint / typecheck / test commands in `docs/agents/verification.md`, and the
+implementer and merger follow that file.
+
 ## Requirements
 
-- opencode V2 (tested on 2.0.32)
+- opencode V2 (tested on 2.0.32; the schema was also verified on 2.2.7)
 - `git`
 - optional: `gh` (GitHub issues) or `glab` (GitLab issues)
 
@@ -23,13 +31,25 @@ That renders the selected profile into `~/.local/share/opencode-workflow/<profil
 `~/.config/opencode/commands` and `~/.config/opencode/agents` to it. Every project now has the
 commands. Existing config is backed up automatically.
 
+**Global skill suppression is manual.** The installer will not rewrite your
+`~/.config/opencode/opencode.json(c)` because it holds your providers and models. To hide
+auto-discovered `.agents/skills`, add this to its `permissions` array:
+
+```json
+{ "action": "skill", "resource": "*", "effect": "deny" }
+```
+
+`doctor` warns if the rule is missing.
+
 Project-local install instead:
 
 ```bash
 ./install.sh --profile four-model project /path/to/repo
 ```
 
-That copies `commands/`, `agents/`, and `opencode.json` into `<repo>/.opencode/`.
+That copies `commands/` and `agents/` file-by-file, backing up only colliding filenames, and
+**merges** the skill-suppression rule into `<repo>/.opencode/opencode.json` if it exists. It never
+replaces your model pins or MCP servers.
 
 ## Per-repo setup
 
@@ -39,8 +59,12 @@ Run once in each repo:
 /setup
 ```
 
-It writes `docs/agents/issue-tracker.md`, `triage-labels.md`, `domain.md`, and an
-`## Agent workflow` block in `AGENTS.md`. Commit those. They are the only per-repo state.
+It writes `docs/agents/issue-tracker.md`, `triage-labels.md`, `domain.md`,
+`verification.md`, and an `## Agent workflow` block in `AGENTS.md`. Commit those. They are the only
+per-repo state.
+
+`verification.md` is what makes the workflow portable: it carries the install, lint, typecheck,
+test, and "never run" commands for this repo. `/setup` detects the toolchain and proposes them.
 
 ## Profiles
 
@@ -54,8 +78,9 @@ It writes `docs/agents/issue-tracker.md`, `triage-labels.md`, `domain.md`, and a
 ```
 
 Profiles are plain `.env` files under `profiles/`. Copy one, change the model IDs, and pass
-`--profile <name>`. The installer renders them into the agents and refuses to leave an unreplaced
-placeholder.
+`--profile <name>`. The model IDs are **OpenCode Go-specific**; on another provider, replace them
+with that provider's equivalents. The installer renders the profile into the agents and refuses to
+leave an unreplaced placeholder.
 
 ## Model mapping (`four-model`)
 
@@ -84,7 +109,12 @@ repos or confidential design conversations.
 | `/implement` | Parallel worktrees, serialized merges, review at the end |
 | `/code-review` | Standards + spec axes, run as parallel subagents |
 | `/handoff` | Compact the conversation into a temp-file handoff |
-| `/setup` | One-time tracker/labels/domain-doc config |
+| `/setup` | One-time tracker/labels/domain-doc/verification config |
+
+## Agent IDs
+
+`mp-*` is a reserved agent-ID namespace once this is installed globally. A project-level
+`.opencode/agents/mp-review.md` will shadow the global one without warning.
 
 ## Verify
 
@@ -92,8 +122,9 @@ repos or confidential design conversations.
 ./install.sh doctor
 ```
 
-Checks the symlinks, the profile variables, and that every model ID exists in `opencode models`.
-In a project, it also notes whether `/setup` has run.
+Checks the symlinks, the profile variables, every model ID in `opencode models`, `git`, the
+tracker CLI named by `docs/agents/issue-tracker.md`, the global skill-suppression rule, and whether
+this repo has `docs/agents/verification.md`.
 
 ## Update
 
@@ -110,8 +141,9 @@ Re-run the installer after a pull: the rendered directory is what the symlinks p
 ./install.sh uninstall
 ```
 
-Removes the global symlinks if they point at this repo's rendered directory. Project installs are
-left alone.
+Removes the global symlinks only if they point at this repo's rendered directory. It leaves
+`$DATA_DIR` and `~/.opencode-work` in place and says so; remove them manually for a clean slate.
+Project installs are left alone.
 
 ## Credits
 

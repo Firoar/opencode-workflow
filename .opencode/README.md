@@ -14,7 +14,7 @@ cross-references. The originals are not needed at runtime.
 | `/implement` | Orchestrates the ticket graph across parallel worktrees, then reviews | `mp-implement` | terminal |
 | `/code-review` | Two-axis review (standards + spec) as parallel subagents | `mp-review` | terminal |
 | `/handoff` | Compacts the conversation into a handoff doc | *(none)* | knowledge |
-| `/setup` | Configures a repo's issue tracker and domain docs | `mp-setup` | terminal |
+| `/setup` | Configures a repo's issue tracker, domain docs, and verification commands | `mp-setup` | terminal |
 
 Typical flow: `/setup` once per repo, then
 `/grill` → `/to-spec` → `/to-tickets` → `/implement` → `/code-review`.
@@ -41,6 +41,11 @@ mp-implement ──────────► mp-explorer, mp-implementer, mp-m
 Each primary denies all subagents, then allows only its own workers. Because opencode's catalog
 filter drops deny-resolved agents, this both restricts the model *and* narrows the menu it sees —
 `mp-review` is shown exactly two subagents, not eleven.
+
+**Verification is per-repo, not per-agent.** `/setup` writes `docs/agents/verification.md` with the
+install, lint, typecheck, test, and "never run" commands. `mp-implementer` and `mp-merger` read
+that file instead of hardcoding a toolchain, so the same agents work in a Yarn repo, a Python
+repo, or a Go repo.
 
 ## Platform constraints this design works around
 
@@ -82,6 +87,10 @@ opencode auto-discovers `.agents/skills` as a compatibility source, which would 
 vendored skills on every turn. These commands need none of them. Non-destructive — delete the rule
 to bring them back.
 
+**Project installs** merge this rule into `<repo>/.opencode/opencode.json`. **Global installs**
+cannot safely rewrite `~/.config/opencode/opencode.json(c)` because it holds your providers and
+models, so the installer prints the rule and `doctor` warns until you add it.
+
 ## Known limitations
 
 - **Slash commands only expand in the TUI.** `opencode run "/grill ..."` passes the text
@@ -89,6 +98,7 @@ to bring them back.
   the same agent without the command wrapper.
 - **An `agent:` switch does not auto-revert.** After `/grill` the session stays on `mp-grill`.
   Each primary's prompt ends by reminding you to switch back to `build`.
+- **Global installs need the skill-suppression rule added manually.** See above.
 - **Global or project-local.** The installer can symlink the commands and agents into
   `~/.config/opencode/` so every project gets them, or copy them into a repo's `.opencode/`.
   See the repo README.
