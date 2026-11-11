@@ -14,6 +14,11 @@ The workflow is **toolchain-agnostic**. It does not assume Yarn, Expo, Python, o
 records its install / lint / typecheck / test commands in `docs/agents/verification.md`, and the
 implementer and merger follow that file.
 
+## Examples
+
+See [examples/README.md](examples/README.md) for the four entry points — obvious fix, small tweak,
+multi-step change, and ambiguous feature — plus the full from-scratch todo app.
+
 ## Requirements
 
 - opencode V2 (tested on 2.0.32; the schema was also verified on 2.2.7)
