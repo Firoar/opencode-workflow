@@ -2,7 +2,7 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SOURCE="$REPO_ROOT/.opencode"
+SOURCE="$REPO_ROOT/template"
 PROFILE_NAME="four-model"
 DRY_RUN=0
 
@@ -17,7 +17,7 @@ Usage:
 Commands:
   global              Render commands + agents and symlink them into ~/.config/opencode
   project <directory> Render commands + agents and copy them into <directory>/.opencode
-  doctor              Verify the symlinks, the profile, the model IDs, and the tracker CLI
+  doctor              Verify symlinks, profile, model IDs, tracker CLI, and skill policy
   uninstall           Remove the global symlinks created by this script
 
 Options:
@@ -78,7 +78,6 @@ done
 CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/opencode"
 DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/opencode-workflow/$PROFILE_NAME"
 WORK_DIR="$HOME/.opencode-work"
-SKILL_RULE='{ "action": "skill", "resource": "*", "effect": "deny" }'
 
 if sed --version >/dev/null 2>&1; then
   SED_INPLACE=(sed -i)
@@ -98,6 +97,168 @@ backup_path() {
   fi
 }
 
+# Small JSONC reader/merger for the targeted skill policy. Kept embedded so the
+# installer stays self-contained.
+config_py() {
+  python3 - "$@" <<'PY'
+import fnmatch
+import json
+import re
+import sys
+
+
+def strip_jsonc(text):
+    out = []
+    i = 0
+    n = len(text)
+    in_string = False
+    escaped = False
+    while i < n:
+        ch = text[i]
+        if in_string:
+            out.append(ch)
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == '"':
+                in_string = False
+            i += 1
+            continue
+        if ch == '"':
+            in_string = True
+            out.append(ch)
+            i += 1
+            continue
+        if ch == "/" and i + 1 < n and text[i + 1] == "/":
+            i += 2
+            while i < n and text[i] not in "\r\n":
+                i += 1
+            continue
+        if ch == "/" and i + 1 < n and text[i + 1] == "*":
+            i += 2
+            while i + 1 < n and not (text[i] == "*" and text[i + 1] == "/"):
+                i += 1
+            i += 2
+            continue
+        out.append(ch)
+        i += 1
+    cleaned = "".join(out)
+    return re.sub(r",(\s*[}\]])", r"\1", cleaned)
+
+
+def load(path):
+    with open(path, encoding="utf-8") as handle:
+        return json.loads(strip_jsonc(handle.read()))
+
+
+def targeted_rules(source):
+    rules = source.get("permissions", [])
+    return [
+        rule
+        for rule in rules
+        if isinstance(rule, dict)
+        and rule.get("action") == "skill"
+        and rule.get("effect") == "deny"
+    ]
+
+
+mode = sys.argv[1]
+if mode == "rules":
+    rules = targeted_rules(load(sys.argv[2]))
+    for index, rule in enumerate(rules):
+        comma = "," if index < len(rules) - 1 else ""
+        print("    " + json.dumps(rule, separators=(", ", ": ")) + comma)
+
+elif mode == "merge":
+    destination, source_path = sys.argv[2], sys.argv[3]
+    rules = targeted_rules(load(source_path))
+    if not rules:
+        raise SystemExit("source contains no targeted skill rules")
+    data = load(destination)
+    if not isinstance(data, dict):
+        raise SystemExit(2)
+    permissions = data.get("permissions")
+    if not isinstance(permissions, list):
+        permissions = []
+    legacy = {"action": "skill", "resource": "*", "effect": "deny"}
+    permissions = [
+        rule for rule in permissions if rule != legacy and rule not in rules
+    ]
+    permissions.extend(rules)
+    data["permissions"] = permissions
+    with open(destination, "w", encoding="utf-8") as handle:
+        json.dump(data, handle, indent=2)
+        handle.write("\n")
+
+elif mode == "check":
+    config_path, source_path = sys.argv[2], sys.argv[3]
+    rules = targeted_rules(load(source_path))
+    legacy = {"action": "skill", "resource": "*", "effect": "deny"}
+    try:
+        data = load(config_path)
+    except Exception:
+        print("parse-error")
+        raise SystemExit(0)
+    if not isinstance(data, dict):
+        print("parse-error")
+        raise SystemExit(0)
+    permissions = data.get("permissions")
+    if not isinstance(permissions, list):
+        permissions = []
+
+    issues = []
+    if legacy in permissions:
+        issues.append("legacy")
+    for rule in rules:
+        if rule not in permissions:
+            issues.append("missing:" + rule["resource"])
+
+    indices = [
+        index
+        for index, rule in enumerate(permissions)
+        if isinstance(rule, dict) and rule in rules
+    ]
+    if indices:
+        first = min(indices)
+        for rule in permissions[first + 1 :]:
+            if not isinstance(rule, dict):
+                continue
+            if rule.get("effect") not in ("allow", "ask"):
+                continue
+            action = rule.get("action", "")
+            if not (
+                action == "*"
+                or action == "skill"
+                or fnmatch.fnmatchcase("skill", action)
+            ):
+                continue
+            resource = rule.get("resource", "")
+            if resource == "*" or any(
+                fnmatch.fnmatchcase(target["resource"], resource) for target in rules
+            ):
+                issues.append("after:" + action + " " + resource)
+
+    if issues:
+        for issue in issues:
+            print(issue)
+    else:
+        print("ok")
+
+else:
+    raise SystemExit("unknown mode: " + mode)
+PY
+}
+
+print_skill_rules() {
+  if ! command -v python3 >/dev/null 2>&1; then
+    log "      python3 is required to print the rules; see $SOURCE/opencode.jsonc"
+    return 0
+  fi
+  log "      Add these rules at the end of your permissions array (keep them last):"
+  config_py rules "$SOURCE/opencode.jsonc" | sed 's/^/      /'
+}
+
 render() {
   local dest="$1"
   if [ "$DRY_RUN" -eq 1 ]; then
@@ -108,7 +269,7 @@ render() {
   mkdir -p "$dest"
   cp -R "$SOURCE/agents" "$dest/agents"
   cp -R "$SOURCE/commands" "$dest/commands"
-  cp "$SOURCE/opencode.json" "$dest/opencode.json"
+  cp "$SOURCE/opencode.jsonc" "$dest/opencode.jsonc"
   cp "$SOURCE/README.md" "$dest/README.md"
 
   local v value
@@ -137,45 +298,51 @@ copy_tree_files() {
 }
 
 merge_project_config() {
-  local dest="$1"
-  if [ ! -e "$dest" ]; then
-    cp "$SOURCE/opencode.json" "$dest"
-    log "wrote $dest"
+  local dest_dir="$1"
+  local jsonc="$dest_dir/opencode.jsonc"
+  local json="$dest_dir/opencode.json"
+  local target=""
+
+  if [ -e "$jsonc" ]; then
+    target="$jsonc"
+  elif [ -e "$json" ]; then
+    target="$json"
+  fi
+
+  if [ -z "$target" ]; then
+    cp "$SOURCE/opencode.jsonc" "$jsonc"
+    log "wrote $jsonc"
     return
   fi
+
   if [ "$DRY_RUN" -eq 1 ]; then
-    log "[dry-run] would merge the skill-suppression rule into $dest"
+    log "[dry-run] would merge the targeted skill policy into $target"
     return
   fi
-  cp "$dest" "${dest}.bak-$(date +%Y%m%d-%H%M%S)"
-  if python3 - "$dest" <<'PY'
-import json
-import sys
 
-path = sys.argv[1]
-with open(path) as f:
-    data = json.load(f)
-if not isinstance(data, dict):
-    raise SystemExit(2)
+  if [ "${target##*.}" = "jsonc" ]; then
+    log "note: $target uses JSONC; leaving it untouched to preserve comments."
+    print_skill_rules
+    return
+  fi
 
-rule = {"action": "skill", "resource": "*", "effect": "deny"}
-permissions = data.get("permissions")
-if not isinstance(permissions, list):
-    permissions = []
-if rule not in permissions:
-    permissions.append(rule)
-data["permissions"] = permissions
+  if ! command -v python3 >/dev/null 2>&1; then
+    log "warn: python3 not found; left $target untouched."
+    print_skill_rules
+    return
+  fi
 
-with open(path, "w") as f:
-    json.dump(data, f, indent=2)
-    f.write("\n")
-PY
-  then
-    log "merged the skill-suppression rule into $dest"
+  local tmp
+  tmp="$(mktemp "${target}.tmp.XXXXXX")"
+  cp "$target" "$tmp"
+  if config_py merge "$tmp" "$SOURCE/opencode.jsonc"; then
+    backup_path "$target"
+    mv "$tmp" "$target"
+    log "merged the targeted skill policy into $target (block kept last)"
   else
-    log "warn: could not parse $dest as JSON; left it untouched."
-    log "      Add this to its permissions array manually:"
-    log "      $SKILL_RULE"
+    rm -f "$tmp"
+    log "warn: could not parse $target; left it untouched."
+    print_skill_rules
   fi
 }
 
@@ -206,19 +373,12 @@ install_global() {
   mkdir -p "$WORK_DIR"
 
   if [ ! -e "$CONFIG_DIR/opencode.json" ] && [ ! -e "$CONFIG_DIR/opencode.jsonc" ]; then
-    cat > "$CONFIG_DIR/opencode.json" <<EOF
-{
-  "\$schema": "https://opencode.ai/config.json",
-  "permissions": [
-    $SKILL_RULE
-  ]
-}
-EOF
-    log "wrote $CONFIG_DIR/opencode.json with skill suppression"
+    cp "$SOURCE/opencode.jsonc" "$CONFIG_DIR/opencode.jsonc"
+    log "wrote $CONFIG_DIR/opencode.jsonc with the targeted skill policy"
   else
     log "note: global installs cannot safely edit your opencode config."
-    log "      To suppress auto-discovered skills, add this to its permissions array:"
-    log "      $SKILL_RULE"
+    log "      To suppress only duplicate workflow skills, add this block at the end of its permissions array:"
+    print_skill_rules
   fi
 
   log "installed profile '$PROFILE_NAME' globally"
@@ -232,14 +392,61 @@ install_project() {
   render "$DATA_DIR"
   if [ "$DRY_RUN" -eq 1 ]; then
     log "[dry-run] would copy commands + agents into $dest"
-    log "[dry-run] would merge the skill-suppression rule into $dest/opencode.json"
+    log "[dry-run] would merge the targeted skill policy into $dest/opencode.json(c)"
     return
   fi
   copy_tree_files "$DATA_DIR/commands" "$dest/commands"
   copy_tree_files "$DATA_DIR/agents" "$dest/agents"
-  merge_project_config "$dest/opencode.json"
+  merge_project_config "$dest"
   log "installed profile '$PROFILE_NAME' into $dest"
   log "next: run /setup in $dir"
+}
+
+check_skill_policy() {
+  local cfg="$1"
+  local label="$2"
+  local output line
+  [ -f "$cfg" ] || return 0
+  if ! command -v python3 >/dev/null 2>&1; then
+    log "warn: python3 not found; cannot check the skill policy in $cfg"
+    return 0
+  fi
+  if ! output="$(config_py check "$cfg" "$SOURCE/opencode.jsonc" 2>/dev/null)"; then
+    log "warn: $label: could not parse $cfg"
+    return 0
+  fi
+  if [ "$output" = "ok" ]; then
+    log "ok: $label: targeted skill policy present (block last)"
+    return 0
+  fi
+
+  local missing=0 legacy=0
+  while IFS= read -r line; do
+    case "$line" in
+      parse-error)
+        log "warn: $label: could not parse $cfg"
+        ;;
+      legacy)
+        legacy=1
+        ;;
+      missing:*)
+        missing=$((missing + 1))
+        ;;
+      after:*)
+        log "warn: $label: rule '${line#after:}' appears after a targeted skill deny and can override it"
+        ;;
+      *)
+        log "warn: $label: $line"
+        ;;
+    esac
+  done <<< "$output"
+
+  if [ "$legacy" -eq 1 ]; then
+    log "warn: $label: blanket 'skill * deny' hides every skill; remove it"
+  fi
+  if [ "$missing" -gt 0 ]; then
+    log "note: $label: $missing targeted deny rule(s) missing; those duplicate skills will be advertised"
+  fi
 }
 
 doctor() {
@@ -271,23 +478,18 @@ doctor() {
     log "MISSING: git"
   fi
 
-  local global_cfg found_rule=0
-  for global_cfg in "$CONFIG_DIR/opencode.json" "$CONFIG_DIR/opencode.jsonc"; do
-    [ -f "$global_cfg" ] || continue
-    if grep -Eq '"action"[[:space:]]*:[[:space:]]*"skill"|"skill"[[:space:]]*:' "$global_cfg"; then
-      log "ok: skill suppression rule found in $global_cfg"
-      found_rule=1
-    fi
+  local global_cfg project_cfg
+  check_skill_policy "$SOURCE/opencode.jsonc" "source"
+  for global_cfg in "$CONFIG_DIR/opencode.jsonc" "$CONFIG_DIR/opencode.json"; do
+    check_skill_policy "$global_cfg" "global"
   done
-  if [ -f "$PWD/.opencode/opencode.json" ] &&
-     grep -Eq '"action"[[:space:]]*:[[:space:]]*"skill"|"skill"[[:space:]]*:' "$PWD/.opencode/opencode.json"; then
-    log "ok: skill suppression rule found in $PWD/.opencode/opencode.json"
-    found_rule=1
-  fi
-  if [ "$found_rule" -eq 0 ]; then
-    log "note: no skill suppression rule found in the global or project config; add this to a permissions array:"
-    log "      $SKILL_RULE"
-  fi
+  for project_cfg in \
+    "$PWD/.opencode/opencode.jsonc" \
+    "$PWD/.opencode/opencode.json" \
+    "$PWD/opencode.jsonc" \
+    "$PWD/opencode.json"; do
+    check_skill_policy "$project_cfg" "project"
+  done
 
   local available
   available="$(opencode models 2>/dev/null || true)"

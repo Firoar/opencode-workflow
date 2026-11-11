@@ -18,7 +18,14 @@ implementer and merger follow that file.
 
 - opencode V2 (tested on 2.0.32; the schema was also verified on 2.2.7)
 - `git`
+- optional: `python3` (config merges and `doctor` skill-policy checks)
 - optional: `gh` (GitHub issues) or `glab` (GitLab issues)
+
+## Layout
+
+The installable payload lives in `template/`. This repo deliberately has no `.opencode/`, so
+opencode does not load the workflow into the workflow repo itself. Target repos receive a normal
+`.opencode/` from the installer.
 
 ## Install
 
@@ -31,15 +38,19 @@ That renders the selected profile into `~/.local/share/opencode-workflow/<profil
 `~/.config/opencode/commands` and `~/.config/opencode/agents` to it. Every project now has the
 commands. Existing config is backed up automatically.
 
-**Global skill suppression is manual.** The installer will not rewrite your
-`~/.config/opencode/opencode.json(c)` because it holds your providers and models. To hide
-auto-discovered `.agents/skills`, add this to its `permissions` array:
+**Skill policy.** The workflow denies only the upstream skills that duplicate its own commands:
+`grill-me`, `grill-with-docs`, `grilling`, `to-spec`, `to-tickets`, `implement`,
+`implement-spec`, `code-review`, `handoff`, and `setup-matt-pocock-skills`. Everything else —
+including `find-skills` and any skill you add later — stays available.
 
-```json
-{ "action": "skill", "resource": "*", "effect": "deny" }
-```
+The canonical block lives at the end of the `permissions` array in `template/opencode.jsonc`; edit
+it there and re-run the installer. To re-enable a skill, delete its deny line. Appending an allow
+after the block also overrides the policy, but `doctor` warns and the next install re-appends the
+deny.
 
-`doctor` warns if the rule is missing.
+Global installs never rewrite `~/.config/opencode/opencode.json(c)` because it holds your
+providers and models. If no global config exists, the installer writes one; otherwise it prints
+the block to add. `doctor` reports missing rules and warns about the old blanket deny.
 
 Project-local install instead:
 
@@ -48,8 +59,9 @@ Project-local install instead:
 ```
 
 That copies `commands/` and `agents/` file-by-file, backing up only colliding filenames, and
-**merges** the skill-suppression rule into `<repo>/.opencode/opencode.json` if it exists. It never
-replaces your model pins or MCP servers.
+**merges** the targeted skill rules into `<repo>/.opencode/opencode.json` if it is strict JSON. If
+the target is `.jsonc`, it leaves the file untouched and prints the block, so comments are never
+lost. It never replaces your model pins or MCP servers.
 
 ## Per-repo setup
 
@@ -128,7 +140,7 @@ repos or confidential design conversations.
 ```
 
 Checks the symlinks, the profile variables, every model ID in `opencode models`, `git`, the
-tracker CLI named by `docs/agents/issue-tracker.md`, the global skill-suppression rule, and whether
+tracker CLI named by `docs/agents/issue-tracker.md`, the targeted skill policy, and whether
 this repo has `docs/agents/verification.md`.
 
 ## Update
@@ -138,7 +150,10 @@ git pull
 ./install.sh --profile four-model global
 ```
 
-Re-run the installer after a pull: the rendered directory is what the symlinks point at.
+Re-run the installer after a pull: the rendered directory is what the symlinks point at. Re-run
+project installs too if you used them. Strict-JSON targets are migrated: the old blanket
+`skill * deny` is removed and the targeted block is appended. `.jsonc` targets are left untouched
+so comments survive, and `doctor` reports what to add.
 
 ## Uninstall
 

@@ -1,0 +1,19 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "permissions": [
+    // Keep this block last. Permissions are evaluated in order and the last
+    // matching rule wins, so these denies override broader allow rules above.
+    // To re-enable a skill, delete its deny line. Adding an allow after this
+    // block would override the deny; doctor warns when that happens.
+    { "action": "skill", "resource": "grill-me", "effect": "deny" },
+    { "action": "skill", "resource": "grill-with-docs", "effect": "deny" },
+    { "action": "skill", "resource": "grilling", "effect": "deny" },
+    { "action": "skill", "resource": "to-spec", "effect": "deny" },
+    { "action": "skill", "resource": "to-tickets", "effect": "deny" },
+    { "action": "skill", "resource": "implement", "effect": "deny" },
+    { "action": "skill", "resource": "implement-spec", "effect": "deny" },
+    { "action": "skill", "resource": "code-review", "effect": "deny" },
+    { "action": "skill", "resource": "handoff", "effect": "deny" },
+    { "action": "skill", "resource": "setup-matt-pocock-skills", "effect": "deny" }
+  ]
+}

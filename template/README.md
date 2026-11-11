@@ -4,6 +4,10 @@ Seven slash commands ported from [mattpocock/skills](https://github.com/mattpoco
 native opencode commands + agents. Each is **fully self-contained** — no skill files, no
 cross-references. The originals are not needed at runtime.
 
+This README ships with the installable payload. The workflow repo keeps the source in `template/`
+and deliberately has no `.opencode/`, so opencode does not load the workflow into the workflow
+repo itself. The installer copies the payload into target repos as `.opencode/`.
+
 ## The commands
 
 | Command | What it does | Agent | Model role |
@@ -75,21 +79,29 @@ repo, or a Go repo.
   orchestrate worktrees, so a five-ticket run doesn't generate fifteen approval prompts. Nothing
   else is loosened.
 
-## Skill suppression
+## Skill policy
 
-`opencode.json` contains one rule:
+`opencode.jsonc` contains a targeted deny block at the **end** of the `permissions` array:
 
-```json
-{ "action": "skill", "resource": "*", "effect": "deny" }
+```jsonc
+{ "action": "skill", "resource": "grill-me", "effect": "deny" }
 ```
 
-opencode auto-discovers `.agents/skills` as a compatibility source, which would advertise all
-vendored skills on every turn. These commands need none of them. Non-destructive — delete the rule
-to bring them back.
+Only the upstream skills that duplicate these commands are denied: `grill-me`,
+`grill-with-docs`, `grilling`, `to-spec`, `to-tickets`, `implement`, `implement-spec`,
+`code-review`, `handoff`, and `setup-matt-pocock-skills`. Every other skill — `find-skills`,
+`tdd`, `research`, your own — remains available.
 
-**Project installs** merge this rule into `<repo>/.opencode/opencode.json`. **Global installs**
-cannot safely rewrite `~/.config/opencode/opencode.json(c)` because it holds your providers and
-models, so the installer prints the rule and `doctor` warns until you add it.
+The block is last because the last matching rule wins. The canonical list is
+`template/opencode.jsonc` in the workflow repo; edit it there and re-run the installer. To
+re-enable a skill, delete its deny line. Appending an allow after the block also overrides the
+policy, but `doctor` warns and the next install re-appends the deny.
+
+**Project installs** merge the targeted rules into `<repo>/.opencode/opencode.json` when it is
+strict JSON. A `.jsonc` target is left untouched and the block is printed, so comments are
+preserved. **Global installs** cannot safely rewrite `~/.config/opencode/opencode.json(c)` because
+it holds your providers and models, so the installer prints the block and `doctor` reports what is
+missing.
 
 ## Known limitations
 
@@ -98,7 +110,7 @@ models, so the installer prints the rule and `doctor` warns until you add it.
   the same agent without the command wrapper.
 - **An `agent:` switch does not auto-revert.** After `/grill` the session stays on `mp-grill`.
   Each primary's prompt ends by reminding you to switch back to `build`.
-- **Global installs need the skill-suppression rule added manually.** See above.
+- **Global installs need the targeted skill policy added manually.** See above.
 - **Global or project-local.** The installer can symlink the commands and agents into
   `~/.config/opencode/` so every project gets them, or copy them into a repo's `.opencode/`.
   See the repo README.
